@@ -1,6 +1,7 @@
 package dag
 
 type edger interface {
+	GetEdges() map[interface{}]map[interface{}]struct{}
 	InitEdge(interface{}, interface{})
 	InitVertexEdges(interface{})
 	GetEdge(interface{}, interface{}) (struct{}, bool)
@@ -16,6 +17,10 @@ type edges struct {
 }
 
 var _ edger = &edges{}
+
+func (e *edges) GetEdges() map[interface{}]map[interface{}]struct{} {
+	return e.edges
+}
 
 func (e *edges) InitEdge(from, to interface{}) {
 	fromHash := e.options.VertexHashFunc(from)
