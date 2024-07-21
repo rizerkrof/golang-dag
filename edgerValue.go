@@ -15,10 +15,10 @@ type edgeValue struct {
 
 var _ edgerValue = &edgeValue{}
 
-func newEmptyEdgeValue() *edgeValue {
+func newEmptyEdgeValue(options Options) *edgeValue {
 	return &edgeValue{
 		edgeValue: make(map[interface{}]struct{}),
-		options:   defaultOptions(),
+		options:   options,
 	}
 }
 

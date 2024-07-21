@@ -28,6 +28,7 @@ type DAG struct {
 	verticesLocked   *dMutex
 	ancestorsCache   edger
 	descendantsCache edger
+	options          Options
 }
 
 // NewDAG creates / initializes a new DAG.
@@ -40,6 +41,7 @@ func NewDAG() *DAG {
 		verticesLocked:   newDMutex(),
 		ancestorsCache:   newEmptyEdges(),
 		descendantsCache: newEmptyEdges(),
+		options:          defaultOptions(),
 	}
 }
 
@@ -524,7 +526,7 @@ func (d *DAG) getAncestors(v interface{}) edgerValue {
 	}
 
 	// as there is no cache, we start from scratch and collect all ancestors locally
-	cache = newEmptyEdgeValue()
+	cache = newEmptyEdgeValue(d.options)
 	var mu sync.Mutex
 	if parents, ok := d.inboundEdge.GetVertexEdges(v); ok {
 
@@ -598,7 +600,7 @@ func (d *DAG) AncestorsWalker(id string) (chan string, chan bool, error) {
 func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 
 	var fifo []interface{}
-	visited := newEmptyEdgeValue()
+	visited := newEmptyEdgeValue(d.options)
 	if parents, exists := d.inboundEdge.GetVertexEdges(v); exists {
 
 		for parent := range parents.GetEdgeValue() {
@@ -680,7 +682,7 @@ func (d *DAG) getDescendants(v interface{}) edgerValue {
 
 	// as there is no cache, we start from scratch and collect all descendants
 	// locally
-	cache = newEmptyEdgeValue()
+	cache = newEmptyEdgeValue(d.options)
 	var mu sync.Mutex
 	if children, ok := d.outboundEdge.GetVertexEdges(v); ok {
 
@@ -855,7 +857,7 @@ func (d *DAG) DescendantsWalker(id string) (chan string, chan bool, error) {
 
 func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) {
 	var fifo []interface{}
-	visited := newEmptyEdgeValue()
+	visited := newEmptyEdgeValue(d.options)
 	if children, exists := d.outboundEdge.GetVertexEdges(v); exists {
 		for child := range children.GetEdgeValue() {
 			visited.SetEdgeValue(child, struct{}{})
@@ -1052,7 +1054,7 @@ func (d *DAG) ReduceTransitively() {
 	for v := range d.vertices.GetVertices() {
 
 		// map of descendants of the children of v
-		descendentsOfChildrenOfV := newEmptyEdgeValue()
+		descendentsOfChildrenOfV := newEmptyEdgeValue(d.options)
 
 		// for each child of v
 		if childrenOfV, exists := d.outboundEdge.GetVertexEdges(v); exists {
