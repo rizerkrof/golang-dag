@@ -13,6 +13,7 @@ type Options struct {
 func (d *DAG) Options(options Options) {
 	d.muDAG.Lock()
 	defer d.muDAG.Unlock()
+	d.options = options
 	d.vertices.SetOptions(options)
 	d.inboundEdge.SetOptions(options)
 	d.outboundEdge.SetOptions(options)
