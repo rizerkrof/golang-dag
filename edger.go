@@ -43,8 +43,7 @@ func (e *edges) InitVertexEdges(vertex interface{}) {
 
 func (e *edges) GetEdge(from, to interface{}) (struct{}, bool) {
 	fromHash := e.options.VertexHashFunc(from)
-	toHash := e.options.VertexHashFunc(to)
-	edge, exists := e.edges[fromHash].GetVertexEdgeValue(toHash)
+	edge, exists := e.edges[fromHash].GetVertexEdgeValue(to)
 	return edge, exists
 }
 
