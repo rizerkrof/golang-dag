@@ -33,8 +33,7 @@ func (e *edges) GetEdges() map[interface{}]edgerValue {
 
 func (e *edges) InitEdge(from, to interface{}) {
 	fromHash := e.options.VertexHashFunc(from)
-	toHash := e.options.VertexHashFunc(to)
-	e.edges[fromHash].SetEdgeValue(toHash, struct{}{})
+	e.edges[fromHash].SetEdgeValue(to, struct{}{})
 }
 
 func (e *edges) InitVertexEdges(vertex interface{}) {
