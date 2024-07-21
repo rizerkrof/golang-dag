@@ -1,12 +1,12 @@
 package dag
 
 type edger interface {
-	GetEdges() map[interface{}]map[interface{}]struct{}
+	GetEdges() map[interface{}]edgerValue
 	InitEdge(interface{}, interface{})
 	InitVertexEdges(interface{})
 	GetEdge(interface{}, interface{}) (struct{}, bool)
-	GetVertexEdges(interface{}) (map[interface{}]struct{}, bool)
-	SetVertexEdges(interface{}, map[interface{}]struct{})
+	GetVertexEdges(interface{}) (edgerValue, bool)
+	SetVertexEdges(interface{}, edgerValue)
 	DeleteEdges()
 	DeleteVertexEdge(interface{}, interface{})
 	DeleteVertexEdges(interface{})
@@ -14,60 +14,60 @@ type edger interface {
 }
 
 type edges struct {
-	edges   map[interface{}]map[interface{}]struct{}
+	edges   map[interface{}]edgerValue
 	options Options
 }
 
 func newEmptyEdges() edger {
 	return &edges{
-		edges:   make(map[interface{}]map[interface{}]struct{}),
+		edges:   make(map[interface{}]edgerValue),
 		options: defaultOptions(),
 	}
 }
 
 var _ edger = &edges{}
 
-func (e *edges) GetEdges() map[interface{}]map[interface{}]struct{} {
+func (e *edges) GetEdges() map[interface{}]edgerValue {
 	return e.edges
 }
 
 func (e *edges) InitEdge(from, to interface{}) {
 	fromHash := e.options.VertexHashFunc(from)
 	toHash := e.options.VertexHashFunc(to)
-	e.edges[fromHash][toHash] = struct{}{}
+	e.edges[fromHash].SetEdgeValue(toHash, struct{}{})
 }
 
 func (e *edges) InitVertexEdges(vertex interface{}) {
 	vertexHash := e.options.VertexHashFunc(vertex)
-	e.edges[vertexHash] = make(map[interface{}]struct{})
+	e.edges[vertexHash] = newEmptyEdgeValue()
 }
 
 func (e *edges) GetEdge(from, to interface{}) (struct{}, bool) {
 	fromHash := e.options.VertexHashFunc(from)
 	toHash := e.options.VertexHashFunc(to)
-	edge, exists := e.edges[fromHash][toHash]
+	edge, exists := e.edges[fromHash].GetVertexEdgeValue(toHash)
 	return edge, exists
 }
 
-func (e *edges) GetVertexEdges(vertex interface{}) (map[interface{}]struct{}, bool) {
+func (e *edges) GetVertexEdges(vertex interface{}) (edgerValue, bool) {
 	vertexHash := e.options.VertexHashFunc(vertex)
 	edges, exists := e.edges[vertexHash]
 	return edges, exists
 }
 
-func (e *edges) SetVertexEdges(vertex interface{}, edges map[interface{}]struct{}) {
+func (e *edges) SetVertexEdges(vertex interface{}, edges edgerValue) {
 	vertexHash := e.options.VertexHashFunc(vertex)
 	e.edges[vertexHash] = edges
 }
 
 func (e *edges) DeleteEdges() {
-	e.edges = make(map[interface{}]map[interface{}]struct{})
+	e.edges = make(map[interface{}]edgerValue)
 }
 
 func (e *edges) DeleteVertexEdge(from, to interface{}) {
 	fromHash := e.options.VertexHashFunc(from)
 	toHash := e.options.VertexHashFunc(to)
-	delete(e.edges[fromHash], toHash)
+	delete(e.edges[fromHash].GetEdgeValue(), toHash)
 }
 
 func (e *edges) DeleteVertexEdges(vertex interface{}) {
