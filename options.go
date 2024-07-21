@@ -14,6 +14,7 @@ func (d *DAG) Options(options Options) {
 	d.muDAG.Lock()
 	defer d.muDAG.Unlock()
 	d.vertices.SetOptions(options)
+	d.inboundEdge.SetOptions(options)
 }
 
 func defaultOptions() Options {
