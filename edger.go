@@ -6,6 +6,8 @@ type edger interface {
 	InitVertexEdges(interface{})
 	GetEdge(interface{}, interface{}) (struct{}, bool)
 	GetVertexEdges(interface{}) (map[interface{}]struct{}, bool)
+	SetVertexEdges(interface{}, map[interface{}]struct{})
+	DeleteEdges()
 	DeleteVertexEdge(interface{}, interface{})
 	DeleteVertexEdges(interface{})
 	SetOptions(Options)
@@ -44,6 +46,15 @@ func (e *edges) GetVertexEdges(vertex interface{}) (map[interface{}]struct{}, bo
 	vertexHash := e.options.VertexHashFunc(vertex)
 	edges, exists := e.edges[vertexHash]
 	return edges, exists
+}
+
+func (e *edges) SetVertexEdges(vertex interface{}, edges map[interface{}]struct{}) {
+	vertexHash := e.options.VertexHashFunc(vertex)
+	e.edges[vertexHash] = edges
+}
+
+func (e *edges) DeleteEdges() {
+	e.edges = make(map[interface{}]map[interface{}]struct{})
 }
 
 func (e *edges) DeleteVertexEdge(from, to interface{}) {

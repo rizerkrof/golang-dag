@@ -16,6 +16,7 @@ func (d *DAG) Options(options Options) {
 	d.vertices.SetOptions(options)
 	d.inboundEdge.SetOptions(options)
 	d.outboundEdge.SetOptions(options)
+	d.ancestorsCache.SetOptions(options)
 }
 
 func defaultOptions() Options {

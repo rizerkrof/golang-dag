@@ -26,7 +26,7 @@ type DAG struct {
 	outboundEdge     edger
 	muCache          sync.RWMutex
 	verticesLocked   *dMutex
-	ancestorsCache   map[interface{}]map[interface{}]struct{}
+	ancestorsCache   edger
 	descendantsCache map[interface{}]map[interface{}]struct{}
 }
 
@@ -38,7 +38,7 @@ func NewDAG() *DAG {
 		inboundEdge:      &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
 		outboundEdge:     &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
 		verticesLocked:   newDMutex(),
-		ancestorsCache:   make(map[interface{}]map[interface{}]struct{}),
+		ancestorsCache:   &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
 		descendantsCache: make(map[interface{}]map[interface{}]struct{}),
 	}
 }
@@ -153,9 +153,9 @@ func (d *DAG) DeleteVertex(id string) error {
 
 	// for v and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, v)
+	d.ancestorsCache.DeleteVertexEdges(v)
 
 	// for v and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
@@ -224,9 +224,9 @@ func (d *DAG) AddEdge(srcID, dstID string) error {
 
 	// for dst and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, dst)
+	d.ancestorsCache.DeleteVertexEdges(dst)
 
 	// for src and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
@@ -309,9 +309,9 @@ func (d *DAG) DeleteEdge(srcID, dstID string) error {
 
 	// for src and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, src)
+	d.ancestorsCache.DeleteVertexEdges(src)
 
 	// for dst and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
@@ -502,7 +502,7 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 
 	// in the best case we have already a populated cache
 	d.muCache.RLock()
-	cache, exists := d.ancestorsCache[v]
+	cache, exists := d.ancestorsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -515,7 +515,7 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 	// now as we have locked this vertex, check (again) that no one has
 	// meanwhile populated the cache
 	d.muCache.RLock()
-	cache, exists = d.ancestorsCache[v]
+	cache, exists = d.ancestorsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -540,7 +540,8 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 
 	// remember the collected descendents
 	d.muCache.Lock()
-	d.ancestorsCache[v] = cache
+	d.ancestorsCache.SetVertexEdges(v, cache)
+
 	d.muCache.Unlock()
 	return cache
 }
@@ -1086,7 +1087,7 @@ func (d *DAG) FlushCaches() {
 }
 
 func (d *DAG) flushCaches() {
-	d.ancestorsCache = make(map[interface{}]map[interface{}]struct{})
+	d.ancestorsCache.DeleteEdges()
 	d.descendantsCache = make(map[interface{}]map[interface{}]struct{})
 }
 
