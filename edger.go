@@ -39,7 +39,7 @@ func (e *edges) InitEdge(from, to interface{}) {
 
 func (e *edges) InitVertexEdges(vertex interface{}) {
 	vertexHash := e.options.VertexHashFunc(vertex)
-	e.edges[vertexHash] = newEmptyEdgeValue()
+	e.edges[vertexHash] = newEmptyEdgeValue(e.options)
 }
 
 func (e *edges) GetEdge(from, to interface{}) (struct{}, bool) {
