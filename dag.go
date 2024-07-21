@@ -20,7 +20,7 @@ type IDInterface interface {
 // DAG implements the data structure of the DAG.
 type DAG struct {
 	muDAG            sync.RWMutex
-	vertices         map[interface{}]string
+	vertices         vertexer
 	vertexIds        map[string]interface{}
 	inboundEdge      map[interface{}]map[interface{}]struct{}
 	outboundEdge     map[interface{}]map[interface{}]struct{}
@@ -33,7 +33,7 @@ type DAG struct {
 // NewDAG creates / initializes a new DAG.
 func NewDAG() *DAG {
 	return &DAG{
-		vertices:         make(map[interface{}]string),
+		vertices:         newEmptyVertices(),
 		vertexIds:        make(map[string]interface{}),
 		inboundEdge:      make(map[interface{}]map[interface{}]struct{}),
 		outboundEdge:     make(map[interface{}]map[interface{}]struct{}),
@@ -84,7 +84,7 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 	if v == nil {
 		return VertexNilError{}
 	}
-	if _, exists := d.vertices[v]; exists {
+	if _, exists := d.vertices.GetVertexID(v); exists {
 		return VertexDuplicateError{v}
 	}
 
@@ -92,7 +92,7 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 		return IDDuplicateError{id}
 	}
 
-	d.vertices[v] = id
+	d.vertices.SetVertexID(v, id)
 	d.vertexIds[id] = v
 
 	return nil
@@ -164,7 +164,7 @@ func (d *DAG) DeleteVertex(id string) error {
 	delete(d.descendantsCache, v)
 
 	// delete v itself
-	delete(d.vertices, v)
+	d.vertices.DeleteVertex(v)
 	delete(d.vertexIds, id)
 
 	return nil
@@ -330,7 +330,7 @@ func (d *DAG) GetOrder() int {
 }
 
 func (d *DAG) getOrder() int {
-	return len(d.vertices)
+	return len(d.vertices.GetVertices())
 }
 
 // GetSize returns the number of edges in the graph.
@@ -357,10 +357,10 @@ func (d *DAG) GetLeaves() map[string]interface{} {
 
 func (d *DAG) getLeaves() map[string]interface{} {
 	leaves := make(map[string]interface{})
-	for v := range d.vertices {
+	for v := range d.vertices.GetVertices() {
 		dstIDs, ok := d.outboundEdge[v]
 		if !ok || len(dstIDs) == 0 {
-			id := d.vertices[v]
+			id, _ := d.vertices.GetVertexID(v)
 			leaves[id] = v
 		}
 	}
@@ -396,10 +396,10 @@ func (d *DAG) GetRoots() map[string]interface{} {
 
 func (d *DAG) getRoots() map[string]interface{} {
 	roots := make(map[string]interface{})
-	for v := range d.vertices {
+	for v := range d.vertices.GetVertices() {
 		srcIDs, ok := d.inboundEdge[v]
 		if !ok || len(srcIDs) == 0 {
-			id := d.vertices[v]
+			id, _ := d.vertices.GetVertexID(v)
 			roots[id] = v
 		}
 	}
@@ -448,7 +448,7 @@ func (d *DAG) GetParents(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	parents := make(map[string]interface{})
 	for pv := range d.inboundEdge[v] {
-		pid := d.vertices[pv]
+		pid, _ := d.vertices.GetVertexID(pv)
 		parents[pid] = pv
 	}
 	return parents, nil
@@ -469,7 +469,7 @@ func (d *DAG) getChildren(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	children := make(map[string]interface{})
 	for cv := range d.outboundEdge[v] {
-		cid := d.vertices[cv]
+		cid, _ := d.vertices.GetVertexID(cv)
 		children[cid] = cv
 	}
 	return children, nil
@@ -490,7 +490,7 @@ func (d *DAG) GetAncestors(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	ancestors := make(map[string]interface{})
 	for av := range d.getAncestors(v) {
-		aid := d.vertices[av]
+		aid, _ := d.vertices.GetVertexID(av)
 		ancestors[aid] = av
 	}
 	return ancestors, nil
@@ -614,7 +614,8 @@ func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			id, _ := d.vertices.GetVertexID(top)
+			ids <- id
 		}
 	}
 }
@@ -638,7 +639,7 @@ func (d *DAG) GetDescendants(id string) (map[string]interface{}, error) {
 
 	descendants := make(map[string]interface{})
 	for dv := range d.getDescendants(v) {
-		did := d.vertices[dv]
+		did, _ := d.vertices.GetVertexID(dv)
 		descendants[did] = dv
 	}
 	return descendants, nil
@@ -865,7 +866,8 @@ func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) 
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			id, _ := d.vertices.GetVertexID(top)
+			ids <- id
 		}
 	}
 }
@@ -1032,7 +1034,7 @@ func (d *DAG) ReduceTransitively() {
 	}
 
 	// for each vertex
-	for v := range d.vertices {
+	for v := range d.vertices.GetVertices() {
 
 		// map of descendants of the children of v
 		descendentsOfChildrenOfV := make(map[interface{}]struct{})
@@ -1107,7 +1109,7 @@ func (d *DAG) String() string {
 	result := fmt.Sprintf("DAG Vertices: %d - Edges: %d\n", d.GetOrder(), d.GetSize())
 	result += "Vertices:\n"
 	d.muDAG.RLock()
-	for k := range d.vertices {
+	for k := range d.vertices.GetVertices() {
 		result += fmt.Sprintf("  %v\n", k)
 	}
 	result += "Edges:\n"
