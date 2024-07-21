@@ -27,7 +27,7 @@ type DAG struct {
 	muCache          sync.RWMutex
 	verticesLocked   *dMutex
 	ancestorsCache   edger
-	descendantsCache map[interface{}]map[interface{}]struct{}
+	descendantsCache edger
 }
 
 // NewDAG creates / initializes a new DAG.
@@ -35,11 +35,11 @@ func NewDAG() *DAG {
 	return &DAG{
 		vertices:         newEmptyVertices(),
 		vertexIds:        make(map[string]interface{}),
-		inboundEdge:      &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
-		outboundEdge:     &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
+		inboundEdge:      newEmptyEdges(),
+		outboundEdge:     newEmptyEdges(),
 		verticesLocked:   newDMutex(),
-		ancestorsCache:   &edges{edges: make(map[interface{}]map[interface{}]struct{}), options: defaultOptions()},
-		descendantsCache: make(map[interface{}]map[interface{}]struct{}),
+		ancestorsCache:   newEmptyEdges(),
+		descendantsCache: newEmptyEdges(),
 	}
 }
 
@@ -159,9 +159,9 @@ func (d *DAG) DeleteVertex(id string) error {
 
 	// for v and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, v)
+	d.descendantsCache.DeleteVertexEdges(v)
 
 	// delete v itself
 	d.vertices.DeleteVertex(v)
@@ -230,9 +230,9 @@ func (d *DAG) AddEdge(srcID, dstID string) error {
 
 	// for src and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, src)
+	d.descendantsCache.DeleteVertexEdges(src)
 
 	return nil
 }
@@ -315,9 +315,9 @@ func (d *DAG) DeleteEdge(srcID, dstID string) error {
 
 	// for dst and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, dst)
+	d.descendantsCache.DeleteVertexEdges(dst)
 
 	return nil
 }
@@ -654,7 +654,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 
 	// in the best case we have already a populated cache
 	d.muCache.RLock()
-	cache, exists := d.descendantsCache[v]
+	cache, exists := d.descendantsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -667,7 +667,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 	// now as we have locked this vertex, check (again) that no one has
 	// meanwhile populated the cache
 	d.muCache.RLock()
-	cache, exists = d.descendantsCache[v]
+	cache, exists = d.descendantsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -699,7 +699,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 
 	// remember the collected descendents
 	d.muCache.Lock()
-	d.descendantsCache[v] = cache
+	d.descendantsCache.SetVertexEdges(v, cache)
 	d.muCache.Unlock()
 	return cache
 }
@@ -1051,7 +1051,8 @@ func (d *DAG) ReduceTransitively() {
 		for childOfV := range childrenOfV {
 
 			// collect child descendants
-			for descendent := range d.descendantsCache[childOfV] {
+			descendents, _ := d.descendantsCache.GetVertexEdges(childOfV)
+			for descendent := range descendents {
 				descendentsOfChildrenOfV[descendent] = struct{}{}
 			}
 		}
@@ -1088,7 +1089,7 @@ func (d *DAG) FlushCaches() {
 
 func (d *DAG) flushCaches() {
 	d.ancestorsCache.DeleteEdges()
-	d.descendantsCache = make(map[interface{}]map[interface{}]struct{})
+	d.descendantsCache.DeleteEdges()
 }
 
 // Copy returns a copy of the DAG.

@@ -18,6 +18,13 @@ type edges struct {
 	options Options
 }
 
+func newEmptyEdges() edger {
+	return &edges{
+		edges:   make(map[interface{}]map[interface{}]struct{}),
+		options: defaultOptions(),
+	}
+}
+
 var _ edger = &edges{}
 
 func (e *edges) GetEdges() map[interface{}]map[interface{}]struct{} {

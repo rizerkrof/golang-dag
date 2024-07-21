@@ -17,6 +17,7 @@ func (d *DAG) Options(options Options) {
 	d.inboundEdge.SetOptions(options)
 	d.outboundEdge.SetOptions(options)
 	d.ancestorsCache.SetOptions(options)
+	d.descendantsCache.SetOptions(options)
 }
 
 func defaultOptions() Options {
