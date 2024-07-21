@@ -20,26 +20,26 @@ type IDInterface interface {
 // DAG implements the data structure of the DAG.
 type DAG struct {
 	muDAG            sync.RWMutex
-	vertices         map[interface{}]string
+	vertices         vertexer
 	vertexIds        map[string]interface{}
-	inboundEdge      map[interface{}]map[interface{}]struct{}
-	outboundEdge     map[interface{}]map[interface{}]struct{}
+	inboundEdge      edger
+	outboundEdge     edger
 	muCache          sync.RWMutex
 	verticesLocked   *dMutex
-	ancestorsCache   map[interface{}]map[interface{}]struct{}
-	descendantsCache map[interface{}]map[interface{}]struct{}
+	ancestorsCache   edger
+	descendantsCache edger
 }
 
 // NewDAG creates / initializes a new DAG.
 func NewDAG() *DAG {
 	return &DAG{
-		vertices:         make(map[interface{}]string),
+		vertices:         newEmptyVertices(),
 		vertexIds:        make(map[string]interface{}),
-		inboundEdge:      make(map[interface{}]map[interface{}]struct{}),
-		outboundEdge:     make(map[interface{}]map[interface{}]struct{}),
+		inboundEdge:      newEmptyEdges(),
+		outboundEdge:     newEmptyEdges(),
 		verticesLocked:   newDMutex(),
-		ancestorsCache:   make(map[interface{}]map[interface{}]struct{}),
-		descendantsCache: make(map[interface{}]map[interface{}]struct{}),
+		ancestorsCache:   newEmptyEdges(),
+		descendantsCache: newEmptyEdges(),
 	}
 }
 
@@ -84,7 +84,7 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 	if v == nil {
 		return VertexNilError{}
 	}
-	if _, exists := d.vertices[v]; exists {
+	if _, exists := d.vertices.GetVertexID(v); exists {
 		return VertexDuplicateError{v}
 	}
 
@@ -92,7 +92,7 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 		return IDDuplicateError{id}
 	}
 
-	d.vertices[v] = id
+	d.vertices.SetVertexID(v, id)
 	d.vertexIds[id] = v
 
 	return nil
@@ -134,37 +134,37 @@ func (d *DAG) DeleteVertex(id string) error {
 	ancestors := copyMap(d.getAncestors(v))
 
 	// delete v in outbound edges of parents
-	if _, exists := d.inboundEdge[v]; exists {
-		for parent := range d.inboundEdge[v] {
-			delete(d.outboundEdge[parent], v)
+	if vertexInboundEdges, exists := d.inboundEdge.GetVertexEdges(v); exists {
+		for parent := range vertexInboundEdges {
+			d.outboundEdge.DeleteVertexEdge(parent, v)
 		}
 	}
 
 	// delete v in inbound edges of children
-	if _, exists := d.outboundEdge[v]; exists {
-		for child := range d.outboundEdge[v] {
-			delete(d.inboundEdge[child], v)
+	if children, exists := d.outboundEdge.GetVertexEdges(v); exists {
+		for child := range children {
+			d.inboundEdge.DeleteVertexEdge(child, v)
 		}
 	}
 
 	// delete in- and outbound of v itself
-	delete(d.inboundEdge, v)
-	delete(d.outboundEdge, v)
+	d.inboundEdge.DeleteVertexEdges(v)
+	d.outboundEdge.DeleteVertexEdges(v)
 
 	// for v and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, v)
+	d.ancestorsCache.DeleteVertexEdges(v)
 
 	// for v and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, v)
+	d.descendantsCache.DeleteVertexEdges(v)
 
 	// delete v itself
-	delete(d.vertices, v)
+	d.vertices.DeleteVertex(v)
 	delete(d.vertexIds, id)
 
 	return nil
@@ -207,32 +207,32 @@ func (d *DAG) AddEdge(srcID, dstID string) error {
 	}
 
 	// prepare d.outbound[src], iff needed
-	if _, exists := d.outboundEdge[src]; !exists {
-		d.outboundEdge[src] = make(map[interface{}]struct{})
+	if _, exists := d.outboundEdge.GetVertexEdges(src); !exists {
+		d.outboundEdge.InitVertexEdges(src)
 	}
 
 	// dst is a child of src
-	d.outboundEdge[src][dst] = struct{}{}
+	d.outboundEdge.InitEdge(src, dst)
 
 	// prepare d.inboundEdge[dst], iff needed
-	if _, exists := d.inboundEdge[dst]; !exists {
-		d.inboundEdge[dst] = make(map[interface{}]struct{})
+	if _, exists := d.inboundEdge.GetVertexEdges(dst); !exists {
+		d.inboundEdge.InitVertexEdges(dst)
 	}
 
 	// src is a parent of dst
-	d.inboundEdge[dst][src] = struct{}{}
+	d.inboundEdge.InitEdge(dst, src)
 
 	// for dst and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, dst)
+	d.ancestorsCache.DeleteVertexEdges(dst)
 
 	// for src and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, src)
+	d.descendantsCache.DeleteVertexEdges(src)
 
 	return nil
 }
@@ -259,16 +259,16 @@ func (d *DAG) IsEdge(srcID, dstID string) (bool, error) {
 
 func (d *DAG) isEdge(src, dst interface{}) bool {
 
-	if _, exists := d.outboundEdge[src]; !exists {
+	if _, exists := d.outboundEdge.GetVertexEdges(src); !exists {
 		return false
 	}
-	if _, exists := d.outboundEdge[src][dst]; !exists {
+	if _, exists := d.outboundEdge.GetEdge(src, dst); !exists {
 		return false
 	}
-	if _, exists := d.inboundEdge[dst]; !exists {
+	if _, exists := d.inboundEdge.GetVertexEdges(dst); !exists {
 		return false
 	}
-	if _, exists := d.inboundEdge[dst][src]; !exists {
+	if _, exists := d.inboundEdge.GetEdge(dst, src); !exists {
 		return false
 	}
 	return true
@@ -304,20 +304,20 @@ func (d *DAG) DeleteEdge(srcID, dstID string) error {
 	ancestors := copyMap(d.getAncestors(dst))
 
 	// delete outbound and inbound
-	delete(d.outboundEdge[src], dst)
-	delete(d.inboundEdge[dst], src)
+	d.outboundEdge.DeleteVertexEdge(src, dst)
+	d.inboundEdge.DeleteVertexEdge(dst, src)
 
 	// for src and all its descendants delete cached ancestors
 	for descendant := range descendants {
-		delete(d.ancestorsCache, descendant)
+		d.ancestorsCache.DeleteVertexEdges(descendant)
 	}
-	delete(d.ancestorsCache, src)
+	d.ancestorsCache.DeleteVertexEdges(src)
 
 	// for dst and all its ancestors delete cached descendants
 	for ancestor := range ancestors {
-		delete(d.descendantsCache, ancestor)
+		d.descendantsCache.DeleteVertexEdges(ancestor)
 	}
-	delete(d.descendantsCache, dst)
+	d.descendantsCache.DeleteVertexEdges(dst)
 
 	return nil
 }
@@ -330,7 +330,7 @@ func (d *DAG) GetOrder() int {
 }
 
 func (d *DAG) getOrder() int {
-	return len(d.vertices)
+	return len(d.vertices.GetVertices())
 }
 
 // GetSize returns the number of edges in the graph.
@@ -342,7 +342,7 @@ func (d *DAG) GetSize() int {
 
 func (d *DAG) getSize() int {
 	count := 0
-	for _, value := range d.outboundEdge {
+	for _, value := range d.outboundEdge.GetEdges() {
 		count += len(value)
 	}
 	return count
@@ -357,10 +357,10 @@ func (d *DAG) GetLeaves() map[string]interface{} {
 
 func (d *DAG) getLeaves() map[string]interface{} {
 	leaves := make(map[string]interface{})
-	for v := range d.vertices {
-		dstIDs, ok := d.outboundEdge[v]
+	for v := range d.vertices.GetVertices() {
+		dstIDs, ok := d.outboundEdge.GetVertexEdges(v)
 		if !ok || len(dstIDs) == 0 {
-			id := d.vertices[v]
+			id, _ := d.vertices.GetVertexID(v)
 			leaves[id] = v
 		}
 	}
@@ -380,7 +380,7 @@ func (d *DAG) IsLeaf(id string) (bool, error) {
 
 func (d *DAG) isLeaf(id string) bool {
 	v := d.vertexIds[id]
-	dstIDs, ok := d.outboundEdge[v]
+	dstIDs, ok := d.outboundEdge.GetVertexEdges(v)
 	if !ok || len(dstIDs) == 0 {
 		return true
 	}
@@ -396,10 +396,10 @@ func (d *DAG) GetRoots() map[string]interface{} {
 
 func (d *DAG) getRoots() map[string]interface{} {
 	roots := make(map[string]interface{})
-	for v := range d.vertices {
-		srcIDs, ok := d.inboundEdge[v]
+	for v := range d.vertices.GetVertices() {
+		srcIDs, ok := d.inboundEdge.GetVertexEdges(v)
 		if !ok || len(srcIDs) == 0 {
-			id := d.vertices[v]
+			id, _ := d.vertices.GetVertexID(v)
 			roots[id] = v
 		}
 	}
@@ -419,7 +419,7 @@ func (d *DAG) IsRoot(id string) (bool, error) {
 
 func (d *DAG) isRoot(id string) bool {
 	v := d.vertexIds[id]
-	srcIDs, ok := d.inboundEdge[v]
+	srcIDs, ok := d.inboundEdge.GetVertexEdges(v)
 	if !ok || len(srcIDs) == 0 {
 		return true
 	}
@@ -447,8 +447,9 @@ func (d *DAG) GetParents(id string) (map[string]interface{}, error) {
 	}
 	v := d.vertexIds[id]
 	parents := make(map[string]interface{})
-	for pv := range d.inboundEdge[v] {
-		pid := d.vertices[pv]
+	pvs, _ := d.inboundEdge.GetVertexEdges(v)
+	for pv, _ := range pvs {
+		pid, _ := d.vertices.GetVertexID(pv)
 		parents[pid] = pv
 	}
 	return parents, nil
@@ -468,8 +469,9 @@ func (d *DAG) getChildren(id string) (map[string]interface{}, error) {
 	}
 	v := d.vertexIds[id]
 	children := make(map[string]interface{})
-	for cv := range d.outboundEdge[v] {
-		cid := d.vertices[cv]
+	cvs, _ := d.outboundEdge.GetVertexEdges(v)
+	for cv := range cvs {
+		cid, _ := d.vertices.GetVertexID(cv)
 		children[cid] = cv
 	}
 	return children, nil
@@ -490,7 +492,7 @@ func (d *DAG) GetAncestors(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	ancestors := make(map[string]interface{})
 	for av := range d.getAncestors(v) {
-		aid := d.vertices[av]
+		aid, _ := d.vertices.GetVertexID(av)
 		ancestors[aid] = av
 	}
 	return ancestors, nil
@@ -500,7 +502,7 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 
 	// in the best case we have already a populated cache
 	d.muCache.RLock()
-	cache, exists := d.ancestorsCache[v]
+	cache, exists := d.ancestorsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -513,7 +515,7 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 	// now as we have locked this vertex, check (again) that no one has
 	// meanwhile populated the cache
 	d.muCache.RLock()
-	cache, exists = d.ancestorsCache[v]
+	cache, exists = d.ancestorsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -522,7 +524,7 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 	// as there is no cache, we start from scratch and collect all ancestors locally
 	cache = make(map[interface{}]struct{})
 	var mu sync.Mutex
-	if parents, ok := d.inboundEdge[v]; ok {
+	if parents, ok := d.inboundEdge.GetVertexEdges(v); ok {
 
 		// for each parent collect its ancestors
 		for parent := range parents {
@@ -538,7 +540,8 @@ func (d *DAG) getAncestors(v interface{}) map[interface{}]struct{} {
 
 	// remember the collected descendents
 	d.muCache.Lock()
-	d.ancestorsCache[v] = cache
+	d.ancestorsCache.SetVertexEdges(v, cache)
+
 	d.muCache.Unlock()
 	return cache
 }
@@ -594,7 +597,8 @@ func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 
 	var fifo []interface{}
 	visited := make(map[interface{}]struct{})
-	for parent := range d.inboundEdge[v] {
+	parents, _ := d.inboundEdge.GetVertexEdges(v)
+	for parent := range parents {
 		visited[parent] = struct{}{}
 		fifo = append(fifo, parent)
 	}
@@ -604,7 +608,8 @@ func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 		}
 		top := fifo[0]
 		fifo = fifo[1:]
-		for parent := range d.inboundEdge[top] {
+		parents, _ := d.inboundEdge.GetVertexEdges(top)
+		for parent := range parents {
 			if _, exists := visited[parent]; !exists {
 				visited[parent] = struct{}{}
 				fifo = append(fifo, parent)
@@ -614,7 +619,8 @@ func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			id, _ := d.vertices.GetVertexID(top)
+			ids <- id
 		}
 	}
 }
@@ -638,7 +644,7 @@ func (d *DAG) GetDescendants(id string) (map[string]interface{}, error) {
 
 	descendants := make(map[string]interface{})
 	for dv := range d.getDescendants(v) {
-		did := d.vertices[dv]
+		did, _ := d.vertices.GetVertexID(dv)
 		descendants[did] = dv
 	}
 	return descendants, nil
@@ -648,7 +654,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 
 	// in the best case we have already a populated cache
 	d.muCache.RLock()
-	cache, exists := d.descendantsCache[v]
+	cache, exists := d.descendantsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -661,7 +667,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 	// now as we have locked this vertex, check (again) that no one has
 	// meanwhile populated the cache
 	d.muCache.RLock()
-	cache, exists = d.descendantsCache[v]
+	cache, exists = d.descendantsCache.GetVertexEdges(v)
 	d.muCache.RUnlock()
 	if exists {
 		return cache
@@ -671,7 +677,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 	// locally
 	cache = make(map[interface{}]struct{})
 	var mu sync.Mutex
-	if children, ok := d.outboundEdge[v]; ok {
+	if children, ok := d.outboundEdge.GetVertexEdges(v); ok {
 
 		// for each child use a goroutine to collect its descendants
 		//var waitGroup sync.WaitGroup
@@ -693,7 +699,7 @@ func (d *DAG) getDescendants(v interface{}) map[interface{}]struct{} {
 
 	// remember the collected descendents
 	d.muCache.Lock()
-	d.descendantsCache[v] = cache
+	d.descendantsCache.SetVertexEdges(v, cache)
 	d.muCache.Unlock()
 	return cache
 }
@@ -781,9 +787,9 @@ func (d *DAG) getRelativesGraphRec(v interface{}, newDAG *DAG, visited map[inter
 	var relatives map[interface{}]struct{}
 	var ok bool
 	if asc {
-		relatives, ok = d.inboundEdge[v]
+		relatives, ok = d.inboundEdge.GetVertexEdges(v)
 	} else {
-		relatives, ok = d.outboundEdge[v]
+		relatives, ok = d.outboundEdge.GetVertexEdges(v)
 	}
 
 	// for all direct relatives in the original graph
@@ -845,7 +851,8 @@ func (d *DAG) DescendantsWalker(id string) (chan string, chan bool, error) {
 func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) {
 	var fifo []interface{}
 	visited := make(map[interface{}]struct{})
-	for child := range d.outboundEdge[v] {
+	children, _ := d.outboundEdge.GetVertexEdges(v)
+	for child := range children {
 		visited[child] = struct{}{}
 		fifo = append(fifo, child)
 	}
@@ -855,7 +862,8 @@ func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) 
 		}
 		top := fifo[0]
 		fifo = fifo[1:]
-		for child := range d.outboundEdge[top] {
+		children, _ := d.outboundEdge.GetVertexEdges(top)
+		for child := range children {
 			if _, exists := visited[child]; !exists {
 				visited[child] = struct{}{}
 				fifo = append(fifo, child)
@@ -865,7 +873,8 @@ func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) 
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			id, _ := d.vertices.GetVertexID(top)
+			ids <- id
 		}
 	}
 }
@@ -1032,28 +1041,31 @@ func (d *DAG) ReduceTransitively() {
 	}
 
 	// for each vertex
-	for v := range d.vertices {
+	for v := range d.vertices.GetVertices() {
 
 		// map of descendants of the children of v
 		descendentsOfChildrenOfV := make(map[interface{}]struct{})
 
 		// for each child of v
-		for childOfV := range d.outboundEdge[v] {
+		childrenOfV, _ := d.outboundEdge.GetVertexEdges(v)
+		for childOfV := range childrenOfV {
 
 			// collect child descendants
-			for descendent := range d.descendantsCache[childOfV] {
+			descendents, _ := d.descendantsCache.GetVertexEdges(childOfV)
+			for descendent := range descendents {
 				descendentsOfChildrenOfV[descendent] = struct{}{}
 			}
 		}
 
 		// for each child of v
-		for childOfV := range d.outboundEdge[v] {
+		childrenOfV, _ = d.outboundEdge.GetVertexEdges(v)
+		for childOfV := range childrenOfV {
 
 			// remove the edge between v and child, iff child is a
 			// descendant of any of the children of v
 			if _, exists := descendentsOfChildrenOfV[childOfV]; exists {
-				delete(d.outboundEdge[v], childOfV)
-				delete(d.inboundEdge[childOfV], v)
+				d.outboundEdge.DeleteVertexEdge(v, childOfV)
+				d.inboundEdge.DeleteVertexEdge(childOfV, v)
 				graphChanged = true
 			}
 		}
@@ -1076,8 +1088,8 @@ func (d *DAG) FlushCaches() {
 }
 
 func (d *DAG) flushCaches() {
-	d.ancestorsCache = make(map[interface{}]map[interface{}]struct{})
-	d.descendantsCache = make(map[interface{}]map[interface{}]struct{})
+	d.ancestorsCache.DeleteEdges()
+	d.descendantsCache.DeleteEdges()
 }
 
 // Copy returns a copy of the DAG.
@@ -1107,11 +1119,11 @@ func (d *DAG) String() string {
 	result := fmt.Sprintf("DAG Vertices: %d - Edges: %d\n", d.GetOrder(), d.GetSize())
 	result += "Vertices:\n"
 	d.muDAG.RLock()
-	for k := range d.vertices {
+	for k := range d.vertices.GetVertices() {
 		result += fmt.Sprintf("  %v\n", k)
 	}
 	result += "Edges:\n"
-	for v, children := range d.outboundEdge {
+	for v, children := range d.outboundEdge.GetEdges() {
 		for child := range children {
 			result += fmt.Sprintf("  %v -> %v\n", v, child)
 		}
