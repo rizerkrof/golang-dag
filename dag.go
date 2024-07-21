@@ -28,6 +28,7 @@ type DAG struct {
 	verticesLocked   *dMutex
 	ancestorsCache   map[interface{}]map[interface{}]struct{}
 	descendantsCache map[interface{}]map[interface{}]struct{}
+	options          Options
 }
 
 // NewDAG creates / initializes a new DAG.
@@ -40,6 +41,9 @@ func NewDAG() *DAG {
 		verticesLocked:   newDMutex(),
 		ancestorsCache:   make(map[interface{}]map[interface{}]struct{}),
 		descendantsCache: make(map[interface{}]map[interface{}]struct{}),
+		options: Options{
+			VertexHashFunc: defaultVertexHashFunc,
+		},
 	}
 }
 
@@ -84,7 +88,8 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 	if v == nil {
 		return VertexNilError{}
 	}
-	if _, exists := d.vertices[v]; exists {
+	vertexHash := d.options.VertexHashFunc(v)
+	if _, exists := d.vertices[vertexHash]; exists {
 		return VertexDuplicateError{v}
 	}
 
@@ -92,7 +97,7 @@ func (d *DAG) addVertexByID(id string, v interface{}) error {
 		return IDDuplicateError{id}
 	}
 
-	d.vertices[v] = id
+	d.vertices[vertexHash] = id
 	d.vertexIds[id] = v
 
 	return nil
@@ -360,7 +365,7 @@ func (d *DAG) getLeaves() map[string]interface{} {
 	for v := range d.vertices {
 		dstIDs, ok := d.outboundEdge[v]
 		if !ok || len(dstIDs) == 0 {
-			id := d.vertices[v]
+			id := d.vertices[d.options.VertexHashFunc(v)]
 			leaves[id] = v
 		}
 	}
@@ -399,7 +404,7 @@ func (d *DAG) getRoots() map[string]interface{} {
 	for v := range d.vertices {
 		srcIDs, ok := d.inboundEdge[v]
 		if !ok || len(srcIDs) == 0 {
-			id := d.vertices[v]
+			id := d.vertices[d.options.VertexHashFunc(v)]
 			roots[id] = v
 		}
 	}
@@ -448,7 +453,7 @@ func (d *DAG) GetParents(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	parents := make(map[string]interface{})
 	for pv := range d.inboundEdge[v] {
-		pid := d.vertices[pv]
+		pid := d.vertices[d.options.VertexHashFunc(pv)]
 		parents[pid] = pv
 	}
 	return parents, nil
@@ -469,7 +474,7 @@ func (d *DAG) getChildren(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	children := make(map[string]interface{})
 	for cv := range d.outboundEdge[v] {
-		cid := d.vertices[cv]
+		cid := d.vertices[d.options.VertexHashFunc(cv)]
 		children[cid] = cv
 	}
 	return children, nil
@@ -490,7 +495,7 @@ func (d *DAG) GetAncestors(id string) (map[string]interface{}, error) {
 	v := d.vertexIds[id]
 	ancestors := make(map[string]interface{})
 	for av := range d.getAncestors(v) {
-		aid := d.vertices[av]
+		aid := d.vertices[d.options.VertexHashFunc(av)]
 		ancestors[aid] = av
 	}
 	return ancestors, nil
@@ -614,7 +619,7 @@ func (d *DAG) walkAncestors(v interface{}, ids chan string, signal chan bool) {
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			ids <- d.vertices[d.options.VertexHashFunc(top)]
 		}
 	}
 }
@@ -638,7 +643,7 @@ func (d *DAG) GetDescendants(id string) (map[string]interface{}, error) {
 
 	descendants := make(map[string]interface{})
 	for dv := range d.getDescendants(v) {
-		did := d.vertices[dv]
+		did := d.vertices[d.options.VertexHashFunc(dv)]
 		descendants[did] = dv
 	}
 	return descendants, nil
@@ -865,7 +870,7 @@ func (d *DAG) walkDescendants(v interface{}, ids chan string, signal chan bool) 
 		case <-signal:
 			return
 		default:
-			ids <- d.vertices[top]
+			ids <- d.vertices[d.options.VertexHashFunc(top)]
 		}
 	}
 }
