@@ -1268,12 +1268,39 @@ type cMutex struct {
 type dMutex struct {
 	mutexes     map[interface{}]*cMutex
 	globalMutex sync.Mutex
+	options     Options
+}
+
+func (d *dMutex) getMutex(i interface{}) (*cMutex, bool) {
+	iHash := d.options.VertexHashFunc(i)
+	mutex, exists := d.mutexes[iHash]
+	return mutex, exists
+}
+
+func (d *dMutex) setMutex(i interface{}, mutex *cMutex) {
+	iHash := d.options.VertexHashFunc(i)
+	d.mutexes[iHash] = mutex
+}
+
+func (d *dMutex) setMutexCount(i interface{}, count int) {
+	iHash := d.options.VertexHashFunc(i)
+	d.mutexes[iHash].count = count
+}
+
+func (d *dMutex) deleteMutex(i interface{}) {
+	iHash := d.options.VertexHashFunc(i)
+	delete(d.mutexes, iHash)
+}
+
+func (d *dMutex) SetOptions(options Options) {
+	d.options = options
 }
 
 // Initialize a new dynamic mutex structure.
 func newDMutex() *dMutex {
 	return &dMutex{
 		mutexes: make(map[interface{}]*cMutex),
+		options: defaultOptions(),
 	}
 }
 
@@ -1284,16 +1311,18 @@ func (d *dMutex) lock(i interface{}) {
 	d.globalMutex.Lock()
 
 	// if there is no cMutex for i, create it
-	if _, ok := d.mutexes[i]; !ok {
-		d.mutexes[i] = new(cMutex)
+	if _, ok := d.getMutex(i); !ok {
+		d.setMutex(i, new(cMutex))
 	}
 
 	// increase the count in order to show, that we are interested in this
 	// instance mutex (thus now one deletes it)
-	d.mutexes[i].count++
+	dmutex, _ := d.getMutex(i)
+	d.setMutexCount(i, dmutex.count+1)
 
 	// remember the mutex for later
-	mutex := &d.mutexes[i].mutex
+	dMutex, _ := d.getMutex(i)
+	mutex := &dMutex.mutex
 
 	// as the cMutex is there, we have increased the count, and we know the
 	// instance mutex, we can release the global lock
@@ -1310,16 +1339,19 @@ func (d *dMutex) unlock(i interface{}) {
 	d.globalMutex.Lock()
 
 	// unlock instance mutex
-	d.mutexes[i].mutex.Unlock()
+	dmutex, _ := d.getMutex(i)
+	dmutex.mutex.Unlock()
 
 	// decrease the count, as we are no longer interested in this instance
 	// mutex
-	d.mutexes[i].count--
+	dmutex, _ = d.getMutex(i)
+	d.setMutexCount(i, dmutex.count-1)
 
 	// if we are the last one interested in this instance mutex delete the
 	// cMutex
-	if d.mutexes[i].count == 0 {
-		delete(d.mutexes, i)
+	dmutex, _ = d.getMutex(i)
+	if dmutex.count == 0 {
+		d.deleteMutex(i)
 	}
 
 	// release the global lock
